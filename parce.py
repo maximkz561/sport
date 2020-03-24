@@ -4,8 +4,6 @@ import time
 
 from selenium import webdriver
 from selenium.common.exceptions import StaleElementReferenceException
-
-from decorators import close_browser
 from locators import MatchPageSelectors, LeaguePageSelectors
 from bs4 import BeautifulSoup
 
@@ -13,6 +11,10 @@ from bs4 import BeautifulSoup
 class Base:
 
     def __init__(self, wait=5, *args, **kwargs):
+        options = webdriver.ChromeOptions()
+        options.add_argument('--headless')
+        self.browser = webdriver.Chrome(options=options)
+        self.browser.implicitly_wait(wait)
         pass
 
     @staticmethod
@@ -22,10 +24,8 @@ class Base:
 
 
 class LeaguePage(Base):
-    def __init__(self, link, wait=5, *args, **kwargs):
-        super().__init__()
-        self.browser = webdriver.Chrome()
-        self.browser.implicitly_wait(wait)
+    def __init__(self, link, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.link = link
         self.page_source = self.get_page_source()
         self.matches_ids = self.get_matches_ids()
@@ -58,10 +58,8 @@ class LeaguePage(Base):
 
 class MatchPage(Base):
 
-    def __init__(self, wait=5, *args, **kwargs):
-        super().__init__()
-        self.browser = webdriver.Chrome()
-        self.browser.implicitly_wait(wait)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.id = kwargs.get('id')
 
         if kwargs.get('link'):
@@ -69,66 +67,52 @@ class MatchPage(Base):
         else:
             self.link = self.id_to_link(self.id)
 
-        self.page_source = self.get_page_source()
-        self.soup = self.get_page_soup()
-        self.date_time = self.get_date_time()
-        self.tournament = self.get_tournament()
-        self.round = self.get_round()
-        self.country = self.get_country()
-        self.team_1 = self.get_team_1_name()
-        self.team_2 = self.get_team_2_name()
+        self.page_source = self._get_page_source()
+        self.soup = self._get_page_soup()
+        self.date_time = self._get_date_time()
+        self.tournament = self._get_tournament()
+        self.round = self._get_round()
+        self.country = self._get_country()
+        self.team_1 = self._create_team_1()
+        self.team_2 = self._create_team_2()
 
-    def get_page_source(self):
+    def _get_page_source(self):
         self.browser.get(self.link)
         page_source = self.browser.page_source
         self.browser.close()
         return page_source
 
-    def get_page_soup(self):
+    def _get_page_soup(self):
         return BeautifulSoup(self.page_source, 'lxml')
 
-    def get_date_time(self):
+    def _get_date_time(self):
         date_time_soup = self.soup.find(attrs=MatchPageSelectors.DATA_TIME_SELECTOR)
         date_time = datetime.datetime.strptime(date_time_soup.text, '%d.%m.%Y %H:%M')
         return date_time
 
-    def get_page_data(self):
-        # data_time = self.soup.find(attrs=MatchPageSelectors.DATA_TIME_SELECTOR).text
-        # data = re.match(r'(.*) ', data_time).group(1)
-        # return data
-        pass
-
-    def get_page_time(self):
-        # data_time = self.soup.find(attrs=MatchPageSelectors.DATA_TIME_SELECTOR).text
-        # time = re.match(r'.* (.*)', data_time).group(1)
-        # return time
-        pass
-
-    def get_tournament(self):
+    def _get_tournament(self):
         tournament_soup = self.soup.select_one(MatchPageSelectors.TOURNAMENT_AND_ROUND_SELECTOR)
         tournament = re.match(r'(.*) - ', tournament_soup.text).group(1)
         return tournament
 
-    def get_country(self):
+    def _get_country(self):
         country_soup = self.soup.select_one(MatchPageSelectors.COUNTRY_SELECTOR)
         country = re.match(r'\w*', str(country_soup.next)).group(0)
         return country
 
-    def get_round(self):
+    def _get_round(self):
         round_soup = self.soup.select_one(MatchPageSelectors.TOURNAMENT_AND_ROUND_SELECTOR)
         round_ = int(re.match(r'.*Round (\d+)', round_soup.text).group(1))
         return round_
 
-    def get_team_1_name(self):
-        name = self.soup.select_one('.home-box .tname a').text
-        return name
+    def _create_team_1(self):
+        return HomeTeam(self)
 
-    def get_team_2_name(self):
-        name = self.soup.select_one('.away-box .tname a').text
-        return name
+    def _create_team_2(self):
+        return AwayTeam(self)
 
 
-class Team():
+class Team:
 
     def __init__(self, match):
         self.soup = match.soup
@@ -152,51 +136,76 @@ class Team():
         self.dangerous_attacks = None
         self.odd = None
 
-
-class HomeTeam(Team):
-    pass
-
-
-class AwayTeam(Team):
-    pass
-
-
-
     def __str__(self):
         return self.name
 
+    def get_name(self, selector):
+        name = self.soup.select_one(selector).text
+        return name
 
-def get_data(link) -> dict:
-    browser = webdriver.Chrome()
-    browser.implicitly_wait(5)
-    browser.get(link)
-    stat_text_groups = browser.find_elements_by_css_selector('#tab-statistics-0-statistic>.statRow>.statTextGroup')
-    stats = []
-    my_dict = {}
-    date = browser.find_element_by_css_selector('#utime').text
-    my_dict.update({'date': date})
-    team_1 = {}
-    team_2 = {}
-    first_team_goals = browser.find_elements_by_css_selector('.current-result .scoreboard')[0]
-    second_team_goals = browser.find_elements_by_css_selector('.current-result .scoreboard')[1]
-    team_1.update({'goals': first_team_goals.text})
-    team_2.update({'goals': second_team_goals.text})
-    team_1_name = browser.find_element_by_css_selector('.team-text.tname-home')
-    team_2_name = browser.find_element_by_css_selector('.team-text.tname-away')
-    odds = browser.find_elements_by_css_selector('.odds.value')
-    team_1.update({'name': team_1_name.text, 'odd': odds[0].text})
-    team_2.update({'name': team_2_name.text, 'odd': odds[2].text})
-    for i in stat_text_groups:
-        field = i.find_element_by_css_selector('.statText--titleValue').text
-        home_value = i.find_element_by_css_selector('.statText--homeValue').text
-        away_value = i.find_element_by_css_selector('.statText--awayValue').text
-        team_1.update({field: home_value})
-        team_2.update({field: away_value})
-    my_dict.update({'team_1': team_1, 'team_2': team_2})
-    browser.close()
-    return my_dict
+    def get_goals(self, selector):
+        goals = self.soup.select_one(selector).text
+        return goals
+
+
+class HomeTeam(Team):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = self.get_name(MatchPageSelectors.TEAM_HOME_NAME)
+        self.goals = self.get_goals(MatchPageSelectors.TEAM_HOME_GOALS)
+
+        # stats from table
+        self.ball_possession = self._get_stat(1)
+        self.goal_attempts = self._get_stat(2)
+        self.shots_on_goal = self._get_stat(3)
+        self.shots_of_goal = self._get_stat(4)
+        self.blocked_shots = self._get_stat(5)
+        self.free_kicks = self._get_stat(6)
+        self.corner_kicks = self._get_stat(7)
+        self.offsides = self._get_stat(8)
+        self.goalkeeper_saves = self._get_stat(9)
+        self.fouls = self._get_stat(10)
+        self.total_passes = self._get_stat(11)
+        self.completed_passes = self._get_stat(12)
+        self.tackles = self._get_stat(13)
+        self.attacks = self._get_stat(14)
+        self.dangerous_attacks = self._get_stat(15)
+
+    def _get_stat(self, number_of_stat):
+        value = self.soup.select('.statRow .statText--homeValue')[number_of_stat-1].text
+        return value
+
+
+class AwayTeam(Team):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = self.get_name(MatchPageSelectors.TEAM_AWAY_NAME)
+        self.goals = self.get_goals(MatchPageSelectors.TEAM_AWAY_GOALS)
+
+        # stats from table
+        self.ball_possession = self._get_stat(1)
+        self.goal_attempts = self._get_stat(2)
+        self.shots_on_goal = self._get_stat(3)
+        self.shots_of_goal = self._get_stat(4)
+        self.blocked_shots = self._get_stat(5)
+        self.free_kicks = self._get_stat(6)
+        self.corner_kicks = self._get_stat(7)
+        self.offsides = self._get_stat(8)
+        self.goalkeeper_saves = self._get_stat(9)
+        self.fouls = self._get_stat(10)
+        self.total_passes = self._get_stat(11)
+        self.completed_passes = self._get_stat(12)
+        self.tackles = self._get_stat(13)
+        self.attacks = self._get_stat(14)
+        self.dangerous_attacks = self._get_stat(15)
+
+    def _get_stat(self, number_of_stat):
+        value = self.soup.select('.statRow .statText--awayValue')[number_of_stat-1].text
+        return value
 
 
 if __name__ == '__main__':
-    # a = LeaguePage('https://www.flashscore.ru/football/england/premier-league-2018-2019/results/', wait=3)
+    a = LeaguePage('https://www.flashscore.ru/football/england/premier-league-2018-2019/results/', wait=3)
     pass
